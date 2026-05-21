@@ -144,10 +144,7 @@ impl TryFrom<&[u8]> for State {
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() != 12 {
-            return Err((
-                "Input must be exactly size 12!",
-                value.len()
-            ));
+            return Err(("Input must be exactly size 12!", value.len()));
         }
         let mut v = 0u64;
         for i in (0..12).rev() {
