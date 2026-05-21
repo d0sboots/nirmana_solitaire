@@ -1,0 +1,27 @@
+[package]
+name = "nirmana_solitaire"
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+debug = "line-tables-only"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+foldhash = "0.2.0"
