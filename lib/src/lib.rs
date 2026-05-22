@@ -220,8 +220,36 @@ pub struct Searcher<'a> {
     /// best is updated.
     pub report_best_fn: &'a dyn Fn(&Solution) -> (),
 
+    states: u64,
     sol: Solution,
     best: Solution,
+}
+
+// Offset applied to scores in max_score_table, and undone in sol.score. See the comment in max_score_table.
+const SCORE_OFFSET: u8 = 3;
+
+// We only need through 50, but we pad to 56 for 8-byte alignment.
+const fn max_score_table() -> [u8; 56] {
+    let mut result = [0u8; 56];
+    // We have to look at how many stones are left over in the initial group, and we assume the
+    // rest can make groups of 3 for 9 points each.
+    // If we have 2 stones left over, the score will be 2.
+    // If we have 3 stones left over, the score will be 3.
+    // If we have 4 stones left over, the score will be 6. (We have to score 2 stones in the backtrack phase.)
+    //
+    // We want the table to be one byte each, but there are range issues: The smallest value is
+    // negative, and the largest value is 159. To fit this, we add an offset and use a u8. The
+    // offset is subtracted in the single place the table is used.
+    result[0] = SCORE_OFFSET;
+    result[1] = SCORE_OFFSET - 3;
+    result[2] = SCORE_OFFSET + 2;
+    result[3] = SCORE_OFFSET + 3;
+    let mut i = 4;
+    while i < 56 {
+        result[i] = result[i-3] + 9;
+        i += 1
+    }
+    result
 }
 
 impl Searcher<'_> {
@@ -229,21 +257,32 @@ impl Searcher<'_> {
         static NOOP: fn(&Solution) = |_| ();
         Self {
             report_best_fn: &NOOP,
+            states: 0,
             sol: Solution::new(),
             best: Solution::new(),
         }
     }
 
     pub fn search(&mut self, state: State) -> Solution {
+        self.states = 0;
+        self.sol.score = -i32::from(SCORE_OFFSET);
         self.search_impl(state);
         // sol should be returned to default by the end of the search
         assert!(self.sol.num_moves == 0);
-        assert!(self.sol.score == 0);
+        assert!(self.sol.score == -i32::from(SCORE_OFFSET));
         self.best.clone()
     }
 
+    /// Set a window hint for the search. The searcher will only find solutions with a score larger
+    /// than the value. Setting this too large will cause the searcher to return no solutions,
+    /// generally quickly. Setting it to 0 takes a bit longer than a well-tuned guess.
     pub fn set_hint(&mut self, hint: i32) {
         self.best.score = hint;
+    }
+
+    /// The number of states the last search searched
+    pub fn searched_states(&self) -> u64 {
+        self.states
     }
 
     // This uses branch-and-bound with a depth-first search to efficiently find an optimal solution.
@@ -257,24 +296,21 @@ impl Searcher<'_> {
     // bottom of the tree, where many possible lines converge to the same states. But by avoiding
     // the need for a hashmap, it makes it much easier to parallelize the search.
     fn search_impl(&mut self, pos: State) -> i32 {
+        self.states += 1;
         let stones = pos.stones();
         if stones == 0 {
             // We've completed the game. Due to max check below, this case doesn't trigger as often
             // as it might seem. We have to check if this makes a new best, in case it needs to be
             // reported.
-            if self.sol.score > self.best.score {
+            if self.sol.score + i32::from(SCORE_OFFSET) > self.best.score {
                 self.report_sol();
             }
             return 0;
         }
-        // We have to look at how many stones are left over in the initial group, and we assume the
-        // rest can make groups of 3 for 9 points each.
-        // If we have 2 stones left over, the score will be 2.
-        // If we have 3 stones left over, the score will be 3.
-        // If we have 4 stones left over, the score will be 4. (We have to make 2 groups.)
-        // This makes for a simple arithmetic expression.
-        let max = ((stones + 1) / 3) as i32 * 6 + (stones as i32) - 6;
-        if max + self.sol.score <= self.best.score {
+        // We fold the adjustment of SCORE_OFFSET into sol.score here, since it is executed for
+        // every search node.
+        const TABLE: [u8; 56] = max_score_table();
+        if i32::from(TABLE[usize::from(stones)]) + self.sol.score <= self.best.score {
             return -1;
         }
         let mut local_score = -1;
@@ -317,6 +353,7 @@ impl Searcher<'_> {
         // entries for the parts we got from the cache. This is a bit expensive, but
         // fortunately improving our max score can happen very few times.
         self.best = self.sol.clone();
+        self.best.score += i32::from(SCORE_OFFSET);
         (self.report_best_fn)(&self.best);
     }
 }

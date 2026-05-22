@@ -47,21 +47,29 @@ fn main() {
         let mut search = Searcher::new();
         let reporter = |sol: &Solution| println!("New best score: {}", sol);
         search.report_best_fn = &reporter;
-        if let Some(x) = args.hint {
-            search.set_hint(x);
-        }
-        let mut start_time = Instant::now();
-        let sol1 = search.search(state);
-        let mut elapsed = Instant::now().duration_since(start_time).as_secs_f64();
-        println!("Final solution: {} took {:.3}s", sol1, elapsed);
-        start_time = Instant::now();
-        let sol2 = search.search(state);
-        elapsed = Instant::now().duration_since(start_time).as_secs_f64();
-        println!("Re-solve: {} took {:.3}s", sol2, elapsed);
-
-        if sol1.moves().len() > 0 {
-            let score = state.play_moves(&sol1.moves()[..sol1.moves().len()-1]).unwrap();
-            println!("Penultimate state {:?} {} gets score {}", state, state, score);
+        let mut hint = match args.hint {
+            Some(x) => x,
+            None => 147,
+        };
+        let overall_start_time = Instant::now();
+        loop {
+            search.set_hint(hint);
+            let start_time = Instant::now();
+            let sol = search.search(state);
+            let elapsed = Instant::now().duration_since(start_time).as_secs_f64();
+            println!("Search with window {} took {:.3}s {} states", hint, elapsed, search.searched_states());
+            if sol.moves().len() > 0 {
+                let overall = Instant::now().duration_since(overall_start_time).as_secs_f64();
+                println!("Final solution: {} overall time {:.3}s", sol, overall);
+                break;
+            }
+            // Empirically, the size of the space searched increases by ~an order of magnitude every
+            // six stones. Because the parity of score equals the parity of stone count, we only
+            // need to consider odd hints (for even scores). The three hints in each group here
+            // cluster at approximately the same size/speed - it's possible to make theoretical
+            // arguments about why, but ultimately it's an empiracal relation. We test only the last
+            // one to avoid duplicate work.
+            hint -= 6;
         }
     }
 }
