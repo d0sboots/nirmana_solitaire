@@ -22,6 +22,7 @@ pub struct State {
     v: u64,
 }
 
+#[derive(Debug)]
 pub struct PlayMovesErr {
     pub msg: &'static str,
     /// The failing move number
@@ -33,28 +34,32 @@ pub struct PlayMovesErr {
 impl State {
     /// Return the score for playing this move, or -1 if it is not legal (no stones)
     #[inline]
-    pub fn play(&mut self, mv: usize, danger: bool) -> i32 {
+    pub fn play(&mut self, mv: usize) -> i32 {
         let mut idx = mv * 5;
         let mut stones = (self.v >> idx) & 31;
         if stones == 0 {
             return -1;
         }
-        if danger {
-            // Fast-path test to early-out if this move is no good
-            let last = (mv as u8 + stones as u8) % 12;
-            let count = (stones + 11) / 12 + ((self.v >> (last * 5)) & 31);
-            if count < 2 || count > 3 {
-                return 0;
+        let mut v = self.v ^ (stones << idx);
+        // We use SIMD techniques to increment all the bowls at once.
+        if stones >= 12 {
+            stones -= 12;
+            v += 0x08421_08421_08421;
+            if stones >= 12 {
+                // Stones being 24 or more doesn't happen, but just in case...
+                stones -= 12;
+                v += 0x08421_08421_08421;
             }
         }
-        let mut v = self.v ^ (stones << idx);
-        while stones > 0 {
-            stones -= 1;
-            idx += 5;
-            if idx >= 60 {
-                idx = 0;
-            }
-            v += 1 << idx;
+        let s5 = stones * 5;
+        let inc = 0x08421_08421_08421 >> (60 - s5);
+        // The low bit of inc starts 5 bits to the left of where we got stones, since
+        // we start adding in the next bowl over.
+        let rotated = (inc << (idx + 5)) & !(0xf << 60) | (inc >> (55 - idx));
+        v += rotated;
+        idx += s5 as usize;
+        if idx >= 60 {
+            idx -= 60;
         }
         let mut bucket = ((v >> idx) & 31) as i32;
         if bucket < 2 || bucket > 3 {
@@ -82,7 +87,7 @@ impl State {
         let mut danger = false;
         let mut score = 0;
         for (i, mv) in moves.into_iter().enumerate() {
-            let act = self.play((*mv).into(), false);
+            let act = self.play((*mv).into());
             if act < 0 {
                 return Err(PlayMovesErr {
                     msg: "Invalid move/no stones in bowl",
@@ -116,7 +121,7 @@ impl State {
     }
 
     pub fn stones(self) -> u8 {
-        let mut r = (self.v & 0x07c1f_07c1f_07c1f) + ((self.v & 0xf82e0_f82e0_f82e0) >> 5);
+        let mut r = (self.v & 0x07c1f_07c1f_07c1f) + ((self.v & 0xf83e0_f83e0_f83e0) >> 5);
         r += r >> 10;
         // If state were arbitrary, the sum could overflow a u8. However, we don't allow this,
         // so we limit the result to 8 bits to improve codegen down the line.
@@ -231,9 +236,26 @@ impl Searcher<'_> {
 
     pub fn search(&mut self, state: State) -> Solution {
         self.search_impl(state);
+        // sol should be returned to default by the end of the search
+        assert!(self.sol.num_moves == 0);
+        assert!(self.sol.score == 0);
         self.best.clone()
     }
 
+    pub fn set_hint(&mut self, hint: i32) {
+        self.best.score = hint;
+    }
+
+    // This uses branch-and-bound with a depth-first search to efficiently find an optimal solution.
+    // We have an absolute (and cheap to calculate) upper-bound on the score at any position based
+    // solely on the number of stones, since you can't do better than 9 points per 3 stones. This
+    // could be used as a consistent heuristic for A*, which provably explores the least number of
+    // nodes in the tree. However, since A* requires a priority queue of to-be-expanded states, the
+    // stack-based nature of the DFS here works out better - expanding slightly more nodes is more
+    // than repaid by doing the work faster.
+    // In the same vein, there are practical speedups that are possible by memoizing values at the
+    // bottom of the tree, where many possible lines converge to the same states. But by avoiding
+    // the need for a hashmap, it makes it much easier to parallelize the search.
     fn search_impl(&mut self, pos: State) -> i32 {
         let stones = pos.stones();
         if stones == 0 {
@@ -258,7 +280,7 @@ impl Searcher<'_> {
         let mut local_score = -1;
         for i in 0..12 {
             let mut p1 = pos;
-            let res1 = p1.play(i, false);
+            let res1 = p1.play(i);
             if res1 < 0 {
                 continue; // No stones in bowl
             }
@@ -272,7 +294,7 @@ impl Searcher<'_> {
                 // In danger, do another move
                 for j in 0..12 {
                     let mut p2 = p1;
-                    let res2 = p2.play(j, true);
+                    let res2 = p2.play(j);
                     if res2 <= 0 {
                         continue; // No stones in bowl, or no capture
                     }
