@@ -56,11 +56,27 @@ fn main() {
             search.set_hint(hint);
             let start_time = Instant::now();
             let sol = search.search(state);
-            let elapsed = Instant::now().duration_since(start_time).as_secs_f64();
+            let after = Instant::now();
+            let elapsed = after.duration_since(start_time).as_secs_f64();
+            let overall = after.duration_since(overall_start_time).as_secs_f64();
             println!("Search with window {} took {:.3}s {} states", hint, elapsed, search.searched_states());
             if sol.moves().len() > 0 {
-                let overall = Instant::now().duration_since(overall_start_time).as_secs_f64();
-                println!("Final solution: {} overall time {:.3}s", sol, overall);
+                println!("│Mv│Scr│{:>48}│ overall time {:.3}s", "Board before move", overall);
+                println!("├──┼───┼────────────────────────────────────────────────┤");
+                let mut pos = state;
+                let mut score = 0;
+                let mut board = [0u8; 12];
+                for mv in sol.moves() {
+                    pos.into_slice(&mut board);
+                    println!("│{:2}│{:3}│{:2?}│", mv, score, board);
+                    score += pos.play((*mv).into())
+                }
+                pos.into_slice(&mut board);
+                println!("│ -│{:3}│{:2?}│", score, board);
+                break;
+            }
+            if hint < sum.into() {
+                println!("No solution found! overall time {:.3}s", overall);
                 break;
             }
             // Empirically, the size of the space searched increases by ~an order of magnitude every
