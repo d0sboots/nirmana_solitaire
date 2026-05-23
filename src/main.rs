@@ -14,6 +14,10 @@ struct Args {
     #[arg(short, long, num_args=..)]
     moves: Vec<u8>,
 
+    /// How much stuff do we print to stderr as the search goes on?
+    #[arg(short, long, default_value = "1")]
+    verbose: i32,
+
     /// If present, indicates a score hint. A proper hint makes searching faster.
     /// An incorrectly large hint will cause no results to be found.
     #[arg(short, long)]
@@ -36,17 +40,18 @@ fn main() {
     );
     let mut state = State::try_from(&*board).unwrap();
 
-    println!("{}", state);
     if args.moves.len() > 0 {
         match state.play_moves(&*args.moves) {
             Ok(score) => println!("Final score: {}", score),
-            Err(err) => println!("{} idx:{} move:{}", err.msg, err.idx, err.mv),
+            Err(err) => eprintln!("{} idx:{} move:{}", err.msg, err.idx, err.mv),
         }
         println!("Final state: {}", state);
     } else {
         let mut search = Searcher::new();
-        let reporter = |sol: &Solution| println!("New best score: {}", sol);
-        search.report_best_fn = &reporter;
+        let reporter = |sol: &Solution| eprintln!("New best score: {}", sol);
+        if args.verbose > 1 {
+            search.report_best_fn = &reporter;
+        }
         let mut hint = match args.hint {
             Some(x) => x,
             None => 147,
@@ -59,12 +64,14 @@ fn main() {
             let after = Instant::now();
             let elapsed = after.duration_since(start_time).as_secs_f64();
             let overall = after.duration_since(overall_start_time).as_secs_f64();
-            println!(
-                "Search with window {} took {:.3}s {} states",
-                hint,
-                elapsed,
-                search.searched_states()
-            );
+            if args.verbose > 0 {
+                eprintln!(
+                    "Search with window {} took {:.3}s {} states",
+                    hint,
+                    elapsed,
+                    search.searched_states()
+                );
+            }
             if sol.moves().len() > 0 {
                 println!(
                     "│Mv│Scr│{:>48}│ overall time {:.3}s",
