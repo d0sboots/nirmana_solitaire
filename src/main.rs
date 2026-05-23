@@ -59,9 +59,17 @@ fn main() {
             let after = Instant::now();
             let elapsed = after.duration_since(start_time).as_secs_f64();
             let overall = after.duration_since(overall_start_time).as_secs_f64();
-            println!("Search with window {} took {:.3}s {} states", hint, elapsed, search.searched_states());
+            println!(
+                "Search with window {} took {:.3}s {} states",
+                hint,
+                elapsed,
+                search.searched_states()
+            );
             if sol.moves().len() > 0 {
-                println!("│Mv│Scr│{:>48}│ overall time {:.3}s", "Board before move", overall);
+                println!(
+                    "│Mv│Scr│{:>48}│ overall time {:.3}s",
+                    "Board before move", overall
+                );
                 println!("├──┼───┼────────────────────────────────────────────────┤");
                 let mut pos = state;
                 let mut score = 0;

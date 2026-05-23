@@ -246,7 +246,7 @@ const fn max_score_table() -> [u8; 56] {
     result[3] = SCORE_OFFSET + 3;
     let mut i = 4;
     while i < 56 {
-        result[i] = result[i-3] + 9;
+        result[i] = result[i - 3] + 9;
         i += 1
     }
     result
